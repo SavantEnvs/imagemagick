@@ -1,0 +1,14 @@
+id=MagickPixelCache
+magick-signature=762599890
+class=DirectClass colors=0 alpha-trait=Undefined
+number-channels=1 number-meta-channels=0 channel-mask=0x0000000007ffffff
+columns=24 rows=16 depth=8
+type=Grayscale
+colorspace=Gray
+page=24x16+0+0
+gamma=0.454545
+date:create=2026-11-18T16:08:14+00:00
+date:modify=2026-11-18T16:08:14+00:00
+date:timestamp=2026-11-18T16:08:14+00:00
+
+:

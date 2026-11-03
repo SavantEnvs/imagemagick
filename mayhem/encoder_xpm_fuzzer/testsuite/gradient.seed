@@ -1,0 +1,22 @@
+/* XPM */
+static char *gradient[] = {
+/* columns rows colors chars-per-pixel */
+"8 8 8 1 ",
+"  c red",
+". c #DB0024",
+"X c #B60049",
+"o c #92006D",
+"O c #6D0092",
+"+ c #4900B6",
+"@ c #2400DB",
+"# c #0000FF",
+/* pixels */
+"        ",
+"........",
+"XXXXXXXX",
+"oooooooo",
+"OOOOOOOO",
+"++++++++",
+"@@@@@@@@",
+"########"
+};

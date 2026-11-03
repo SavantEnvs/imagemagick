@@ -1,0 +1,7 @@
+push graphic-context
+viewbox 0 0 64 64
+font-size 12
+fill green
+path "M 5 5 L 50 5 L 25 40 Z"
+text 5,60 "hi"
+pop graphic-context

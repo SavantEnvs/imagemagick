@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<image>
+  <read filename="xc:red" />
+  <resize geometry="8x8" />
+  <blur radius="0" sigma="1" />
+  <negate />
+</image>

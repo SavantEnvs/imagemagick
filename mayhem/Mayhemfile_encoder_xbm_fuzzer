@@ -1,0 +1,9 @@
+project: savantenvs/imagemagick
+target: encoder_xbm_fuzzer
+testsuite:
+  - https://$MAYHEM_DOMAIN/$MAYHEM_PROJECT/$MAYHEM_TARGET/testsuite.tar
+  - file://mayhem/encoder_xbm_fuzzer/testsuite
+cmds:
+  - cmd: /mayhem/encoder_xbm_fuzzer
+    libfuzzer: true
+    timeout: 10

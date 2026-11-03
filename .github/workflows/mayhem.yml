@@ -1,0 +1,216 @@
+# The Mayhem worker: build the commit image from mayhem/Dockerfile, push it to ghcr, then run
+# Mayhem over each Mayhemfile. Runs on manual dispatch and is called by the sync cron
+# (sync.yml) only when upstream actually moved — we fuzz on real upstream movement or an explicit
+# dispatch, NOT on every commit to the mayhem branch.
+# Three duration tiers:
+#   - 300s  (5 min)  manual dispatch / `/check` — a CONFIRMATION run that proves every target gets edges
+#                    in Mayhem (run-health). This is the integrated gate; kept short so /check is fast.
+#   - 1200s (20 min) the weekly sync cron (workflow_call) — regular bug-finding as upstream moves.
+#   - long  (4h+)    a deliberate DEEP-RUN pass: scripts/integration/deep-run.sh, or
+#                    gh workflow run mayhem.yml --ref mayhem -f duration=14400
+# Only the 5-min edges check gates `integrated`; 20m/4h are bug-finding, never required for integrated.
+# Fill in the `mayhemfile` matrix below. Needs the MAYHEM_TOKEN secret.
+name: Mayhem
+
+on:
+  workflow_dispatch:             # manual / `/check` run (gh workflow run mayhem.yml --ref mayhem [-f duration=14400])
+    inputs:
+      duration:
+        description: 'Fuzz seconds per target (default 300 = 5 min confirmation; e.g. 14400 = 4h deep run).'
+        type: string
+        required: false
+        default: '300'
+  workflow_call:                 # sync.yml calls this (only when upstream moved), passing the rebased SHA
+    inputs:
+      ref:
+        description: commit/branch to build (cron passes the freshly-rebased mayhem SHA)
+        type: string
+        required: false
+        default: ''
+      duration:                  # the weekly cron's regular bug-finding run: 20 min (deep-run requests longer)
+        description: fuzz seconds per target
+        type: string
+        required: false
+        default: '1200'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: build commit image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write          # push the commit image to ghcr.io/<org>/<repo>
+    steps:
+      - name: Free disk space (the commit image holds ~200 sanitized static binaries, ~11 GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0          # FULL history — the Dockerfile COPYs .git into /mayhem, so the image
+                                  # must hold a real copy of the `mayhem` branch (upstream history + the
+                                  # additive integration commit). The default depth-1 shallow clone bakes
+                                  # in a single squashed-looking commit and breaks the grader / PATCH tier.
+          ref: ${{ inputs.ref || github.sha }}     # build the cron's rebased SHA when called
+
+      - name: Resolve build SHA
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: type=raw,value=commit-${{ steps.sha.outputs.sha }}   # tag the exact built commit
+
+      - name: Build and push (mayhem/Dockerfile)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: mayhem/Dockerfile
+          push: true
+          build-args: |
+            COMMIT=${{ steps.sha.outputs.sha }}
+            REPO_URL=${{ github.server_url }}/${{ github.repository }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+    outputs:
+      image: ${{ steps.meta.outputs.tags }}
+      ref: ${{ steps.sha.outputs.sha }}
+
+  mayhem:
+    needs: build
+    name: 'fuzz ${{ matrix.mayhemfile }}'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mayhemfile:                 # one entry per mayhem/Mayhemfile_*
+          - mayhem/Mayhemfile_encoder_bmp_fuzzer
+          - mayhem/Mayhemfile_encoder_dds_fuzzer
+          - mayhem/Mayhemfile_encoder_fits_fuzzer
+          - mayhem/Mayhemfile_encoder_gif_fuzzer
+          - mayhem/Mayhemfile_encoder_hdr_fuzzer
+          - mayhem/Mayhemfile_encoder_heic_fuzzer
+          - mayhem/Mayhemfile_encoder_icon_fuzzer
+          - mayhem/Mayhemfile_encoder_jp2_fuzzer
+          - mayhem/Mayhemfile_encoder_jpeg_fuzzer
+          - mayhem/Mayhemfile_encoder_jxl_fuzzer
+          - mayhem/Mayhemfile_encoder_miff_fuzzer
+          - mayhem/Mayhemfile_encoder_msvg_fuzzer
+          - mayhem/Mayhemfile_encoder_mvg_fuzzer
+          - mayhem/Mayhemfile_encoder_pcx_fuzzer
+          - mayhem/Mayhemfile_encoder_pict_fuzzer
+          - mayhem/Mayhemfile_encoder_png_fuzzer
+          - mayhem/Mayhemfile_encoder_pnm_fuzzer
+          - mayhem/Mayhemfile_encoder_psd_fuzzer
+          - mayhem/Mayhemfile_encoder_qoi_fuzzer
+          - mayhem/Mayhemfile_encoder_sgi_fuzzer
+          - mayhem/Mayhemfile_encoder_sun_fuzzer
+          - mayhem/Mayhemfile_encoder_svg_fuzzer
+          - mayhem/Mayhemfile_encoder_tga_fuzzer
+          - mayhem/Mayhemfile_encoder_tiff_fuzzer
+          - mayhem/Mayhemfile_encoder_wbmp_fuzzer
+          - mayhem/Mayhemfile_encoder_webp_fuzzer
+          - mayhem/Mayhemfile_encoder_xbm_fuzzer
+          - mayhem/Mayhemfile_encoder_xpm_fuzzer
+          - mayhem/Mayhemfile_ping_fuzzer
+          - mayhem/Mayhemfile_profile_fuzzer
+          - mayhem/Mayhemfile_huffman_decode_fuzzer
+          - mayhem/Mayhemfile_encoder_gradient_fuzzer
+          - mayhem/Mayhemfile_encoder_label_fuzzer
+          - mayhem/Mayhemfile_encoder_pattern_fuzzer
+          - mayhem/Mayhemfile_encoder_plasma_fuzzer
+          - mayhem/Mayhemfile_encoder_radial-gradient_fuzzer
+          - mayhem/Mayhemfile_encoder_xc_fuzzer
+          - mayhem/Mayhemfile_encoder_aai_fuzzer
+          - mayhem/Mayhemfile_encoder_art_fuzzer
+          - mayhem/Mayhemfile_encoder_ase_fuzzer
+          - mayhem/Mayhemfile_encoder_avs_fuzzer
+          - mayhem/Mayhemfile_encoder_bayer_fuzzer
+          - mayhem/Mayhemfile_encoder_bgr_fuzzer
+          - mayhem/Mayhemfile_encoder_cals_fuzzer
+          - mayhem/Mayhemfile_encoder_caption_fuzzer
+          - mayhem/Mayhemfile_encoder_cin_fuzzer
+          - mayhem/Mayhemfile_encoder_clip_fuzzer
+          - mayhem/Mayhemfile_encoder_cmyk_fuzzer
+          - mayhem/Mayhemfile_encoder_cube_fuzzer
+          - mayhem/Mayhemfile_encoder_cut_fuzzer
+          - mayhem/Mayhemfile_encoder_dcm_fuzzer
+          - mayhem/Mayhemfile_encoder_djvu_fuzzer
+          - mayhem/Mayhemfile_encoder_dng_fuzzer
+          - mayhem/Mayhemfile_encoder_dpx_fuzzer
+          - mayhem/Mayhemfile_encoder_exr_fuzzer
+          - mayhem/Mayhemfile_encoder_farbfeld_fuzzer
+          - mayhem/Mayhemfile_encoder_fax_fuzzer
+          - mayhem/Mayhemfile_encoder_fl32_fuzzer
+          - mayhem/Mayhemfile_encoder_ftxt_fuzzer
+          - mayhem/Mayhemfile_encoder_gray_fuzzer
+          - mayhem/Mayhemfile_encoder_hald_fuzzer
+          - mayhem/Mayhemfile_encoder_hrz_fuzzer
+          - mayhem/Mayhemfile_encoder_inline_fuzzer
+          - mayhem/Mayhemfile_encoder_ipl_fuzzer
+          - mayhem/Mayhemfile_encoder_jbig_fuzzer
+          - mayhem/Mayhemfile_encoder_jnx_fuzzer
+          - mayhem/Mayhemfile_encoder_mac_fuzzer
+          - mayhem/Mayhemfile_encoder_map_fuzzer
+          - mayhem/Mayhemfile_encoder_mask_fuzzer
+          - mayhem/Mayhemfile_encoder_mat_fuzzer
+          - mayhem/Mayhemfile_encoder_mono_fuzzer
+          - mayhem/Mayhemfile_encoder_mpc_fuzzer
+          - mayhem/Mayhemfile_encoder_msl_fuzzer
+          - mayhem/Mayhemfile_encoder_mtv_fuzzer
+          - mayhem/Mayhemfile_encoder_otb_fuzzer
+          - mayhem/Mayhemfile_encoder_palm_fuzzer
+          - mayhem/Mayhemfile_encoder_pcd_fuzzer
+          - mayhem/Mayhemfile_encoder_pdb_fuzzer
+          - mayhem/Mayhemfile_encoder_pes_fuzzer
+          - mayhem/Mayhemfile_encoder_pgx_fuzzer
+          - mayhem/Mayhemfile_encoder_pix_fuzzer
+          - mayhem/Mayhemfile_encoder_pwp_fuzzer
+          - mayhem/Mayhemfile_encoder_rgb_fuzzer
+          - mayhem/Mayhemfile_encoder_rgf_fuzzer
+          - mayhem/Mayhemfile_encoder_rla_fuzzer
+          - mayhem/Mayhemfile_encoder_rle_fuzzer
+          - mayhem/Mayhemfile_encoder_scr_fuzzer
+          - mayhem/Mayhemfile_encoder_sct_fuzzer
+          - mayhem/Mayhemfile_encoder_sf3_fuzzer
+          - mayhem/Mayhemfile_encoder_sfw_fuzzer
+          - mayhem/Mayhemfile_encoder_sixel_fuzzer
+          - mayhem/Mayhemfile_encoder_stegano_fuzzer
+          - mayhem/Mayhemfile_encoder_strimg_fuzzer
+          - mayhem/Mayhemfile_encoder_tile_fuzzer
+          - mayhem/Mayhemfile_encoder_tim_fuzzer
+          - mayhem/Mayhemfile_encoder_ttf_fuzzer
+          - mayhem/Mayhemfile_encoder_uyvy_fuzzer
+          - mayhem/Mayhemfile_encoder_vicar_fuzzer
+          - mayhem/Mayhemfile_encoder_vid_fuzzer
+          - mayhem/Mayhemfile_encoder_viff_fuzzer
+          - mayhem/Mayhemfile_encoder_vips_fuzzer
+          - mayhem/Mayhemfile_encoder_wbinfo_fuzzer
+          - mayhem/Mayhemfile_encoder_wpg_fuzzer
+          - mayhem/Mayhemfile_encoder_xcf_fuzzer
+          - mayhem/Mayhemfile_encoder_ycbcr_fuzzer
+          - mayhem/Mayhemfile_encoder_yuv_fuzzer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.ref }}
+      - name: Start analysis for ${{ matrix.mayhemfile }}
+        uses: ForAllSecure/mcode-action@v1
+        with:
+          mayhem-token: ${{ secrets.MAYHEM_TOKEN }}
+          args: --image ${{ needs.build.outputs.image }} --file ${{ matrix.mayhemfile }} --duration ${{ inputs.duration || '1200' }}
