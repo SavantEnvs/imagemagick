@@ -1,0 +1,7 @@
+push graphic-context
+viewbox 0 0 32 32
+fill red
+rectangle 2,2 20,20
+stroke blue
+circle 16,16 20,20
+pop graphic-context

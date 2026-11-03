@@ -1,0 +1,6 @@
+project: savantenvs/imagemagick
+target: encoder_heic_fuzzer
+cmds:
+  - cmd: /mayhem/encoder_heic_fuzzer
+    libfuzzer: true
+    timeout: 10
